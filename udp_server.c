@@ -28,6 +28,14 @@
 //     return 0;
 // }
 
+typedef struct Lobby{
+  int host_id;
+  char lobby_name[16];
+  struct sockaddr_storage client_list[4];
+  socklen_t client_len[4];
+  int client_count;
+} Lobby;
+
 void HandleNewHost(struct sockaddr_storage (*_sockaddr_host_list),
                    socklen_t (*_socklen_host_list),
                    struct sockaddr_storage _host_address,
@@ -35,8 +43,18 @@ void HandleNewHost(struct sockaddr_storage (*_sockaddr_host_list),
                    int* _host_count,
                    char* _lobby_name, 
                    int _lobby_name_size, 
-                   char (*_lobby_names)[16])
+                   char (*_lobby_names)[16],
+                   Lobby* _lobby_list)
 {
+  char temp_lobby_name[16] = {0};
+  memcpy(temp_lobby_name, _lobby_name, _lobby_name_size);
+  temp_lobby_name[15] = '\0';
+  printf("Temp lobby name: %s\n", temp_lobby_name);
+  Lobby lobby = {*_host_count};
+  memcpy(&lobby.lobby_name, temp_lobby_name, 16);
+  printf("Lobby name: %s\n", lobby.lobby_name);
+  _lobby_list[*_host_count] = lobby;
+  printf("Stored Lobby name: %s\n", _lobby_list->lobby_name);
   _sockaddr_host_list[*_host_count] = _host_address;
   _socklen_host_list[*_host_count] = _host_len;
   for (int x = 0; x < _lobby_name_size; x++)
@@ -52,14 +70,16 @@ int HandleNewClient(struct sockaddr_storage (*_sockaddr_client_list)[3],
                    struct sockaddr_storage _client_address,
                    socklen_t _client_len, 
                    int host,
-                   int clientSpot)
+                   int clientSpot,
+                   Lobby* _lobby_list)
 {
   if(host > 3 || clientSpot > 3)
     return -1;
   struct sockaddr_storage zero_address = {0};
-  if(memcmp(&_sockaddr_client_list[host][clientSpot], &zero_address, sizeof(zero_address)) == 0){
-    _sockaddr_client_list[host][clientSpot] = _client_address;
-    _socklen_client_list[host][clientSpot] = _client_len;
+  if(memcmp(&_lobby_list->client_list[clientSpot], &zero_address, sizeof(zero_address)) == 0){
+    _lobby_list->client_list[clientSpot] = _client_address;
+    _lobby_list->client_len[clientSpot] = _client_len;
+    _lobby_list->client_count += 1;
     return 1;
   }
   return 0;
@@ -118,6 +138,7 @@ int main() {
   int spawn_count = 0;
   int current_tick = 0;
   int maxHosts = 4;
+  Lobby lobby_list[4] = {0};
   struct sockaddr_storage sockaddr_host_list[4] = {0};
   struct sockaddr_storage sockaddr_client_list[4][3] = {0};
   socklen_t socklen_host_list[4] = {0};
@@ -151,21 +172,57 @@ int main() {
         memcpy(&code, read, 2);
         printf("%d\n", code);
         switch (read[0]){
+          //New Connection
           case 1: 
             switch (read[1]){
+              //client connecting to lobby
               case 0:
+              {
+                int host = read[2]; //host bit is 3rd bit, the lobby they want to join
+                int spot = lobby_list[host].client_count; //spot bit is 4th bit, spot in the lobby they want to join
+                if(HandleNewClient(sockaddr_client_list, socklen_client_list, client_address, client_len, host, spot, &lobby_list[host]) > 0){
+                  char send_buffer[18];
+                  send_buffer[0] = 0;
+                  send_buffer[1] = 0;
+                  memcpy(&send_buffer[2], lobby_list[host].lobby_name, 16);
+                  printf("Sending\n");
+                  sendto(socket_listen, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *)&lobby_list[host].client_list[spot], lobby_list[host].client_len[spot]);
+                }
+              }
                 break;
+              // Host is connecting
               case 1:
+              {
                 if(hostCount >= maxHosts)
                   break;
-                HandleNewHost(sockaddr_host_list, socklen_host_list, client_address, client_len, &hostCount, read+2, bytes_received-2, lobbyNames);
+                int host = hostCount;
+                HandleNewHost(sockaddr_host_list, socklen_host_list, client_address, client_len, &hostCount, read+2, bytes_received-2, lobbyNames, lobby_list);
                 //Send Lobby Name back as an acknowledge
-                char send_buffer[17] = {0};
-                for(int i = 0; i < 16; i++){
-                  send_buffer[i + 1] = lobbyNames[hostCount-1][i];
-                }
+                char send_buffer[18];
+                send_buffer[0] = 0;
+                send_buffer[1] = 0;
+                memcpy(&send_buffer[2], lobby_list[host].lobby_name, 16);
                 printf("Sending\n");
-                sendto(socket_listen, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *)&sockaddr_host_list[hostCount-1], socklen_host_list[hostCount-1]);
+                sendto(socket_listen, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *)&sockaddr_host_list[host], socklen_host_list[host]);
+              }
+                break;
+              //Client requesting lobby list
+              case 2:
+              {
+                char send_buffer[66];
+                send_buffer[0] = 0;
+                send_buffer[1] = 2;
+                for(int i = 0; i < 4; i++){
+                  memcpy(&send_buffer[(i * 16) + 2], &lobbyNames[i], 16);
+                }
+                send_buffer[65] = '\0';
+                for (int i = 0; i < 4; i++)
+                {
+                  printf("Lobby name: %s\n", &send_buffer[(i*16)+2]);
+                }
+                sendto(socket_listen, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *)&client_address, client_len);
+                // printf("Send buffer: %s\n", send_buffer);
+              }
                 break;
               default:
                 break;
@@ -174,15 +231,6 @@ int main() {
               //New Host, add to host list and update lobby names list
             } //end if signal byte is 1 and host count is acceptable
             else if (read[1] == 0){ //if the second bit is 0, they are not a host
-              int host = read[2]; //host bit is 3rd bit, the lobby they want to join
-              int spot = read[3]; //spot bit is 4th bit, spot in the lobby they want to join
-              HandleNewClient(sockaddr_client_list, socklen_client_list, client_address, client_len, host, spot);
-              char send_buffer[17] = {0};
-              for(int i = 0; i < 16; i++){
-                send_buffer[i + 1] = lobbyNames[hostCount-1][i];
-              }
-              printf("Sending\n");
-              sendto(socket_listen, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *)&sockaddr_client_list[host][spot], socklen_client_list[host][spot]);
             }
             break;
           case 2:
