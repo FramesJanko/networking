@@ -181,10 +181,13 @@ int main() {
                 int host = read[2]; //host bit is 3rd bit, the lobby they want to join
                 int spot = lobby_list[host].client_count; //spot bit is 4th bit, spot in the lobby they want to join
                 if(HandleNewClient(sockaddr_client_list, socklen_client_list, client_address, client_len, host, spot, &lobby_list[host]) > 0){
-                  char send_buffer[18];
+                  char send_buffer[20];
                   send_buffer[0] = 0;
                   send_buffer[1] = 0;
-                  memcpy(&send_buffer[2], lobby_list[host].lobby_name, 16);
+                  send_buffer[2] = host;
+                  send_buffer[3] = spot;
+                  printf("Connecting to host [%d] in spot [%d]\n", send_buffer[2], send_buffer[3]);
+                  memcpy(&send_buffer[4], lobby_list[host].lobby_name, 16);
                   printf("Sending\n");
                   sendto(socket_listen, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *)&lobby_list[host].client_list[spot], lobby_list[host].client_len[spot]);
                 }
