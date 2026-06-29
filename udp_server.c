@@ -201,10 +201,11 @@ int main() {
                 int host = hostCount;
                 HandleNewHost(sockaddr_host_list, socklen_host_list, client_address, client_len, &hostCount, read+2, bytes_received-2, lobbyNames, lobby_list);
                 //Send Lobby Name back as an acknowledge
-                char send_buffer[18];
+                char send_buffer[19];
                 send_buffer[0] = 0;
                 send_buffer[1] = 0;
-                memcpy(&send_buffer[2], lobby_list[host].lobby_name, 16);
+                send_buffer[2] = host;
+                memcpy(&send_buffer[3], lobby_list[host].lobby_name, 16);
                 printf("Sending\n");
                 sendto(socket_listen, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *)&sockaddr_host_list[host], socklen_host_list[host]);
               }
@@ -230,13 +231,20 @@ int main() {
               default:
                 break;
             }
-            if(read[1] == 1 && hostCount < maxHosts){ //if the second bit is 1, it's a new host
-              //New Host, add to host list and update lobby names list
-            } //end if signal byte is 1 and host count is acceptable
-            else if (read[1] == 0){ //if the second bit is 0, they are not a host
-            }
             break;
           case 2:
+            {
+              int host = read[1];
+              Lobby lobby = lobby_list[host];
+              int num_clients = lobby.client_count;
+              for(int i = 0; i < num_clients; i++){
+                char address_name[46];
+                char port_name[46];
+                getnameinfo((struct sockaddr *)&lobby.client_list[i], lobby.client_len[i], address_name, 20, port_name, 20, NI_NUMERICHOST | NI_NUMERICSERV);
+                printf("Sending to %s on port %s\n", address_name, port_name);
+                sendto(socket_listen, read, bytes_received, 0, (struct sockaddr *)&lobby.client_list[i], lobby.client_len[i]);
+              }
+            }
             break;
           case 3:
             break;
