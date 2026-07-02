@@ -170,7 +170,6 @@ int main() {
         } //end bytes received
         int code = 0;
         memcpy(&code, read, 2);
-        printf("%d\n", code);
         switch (read[0]){
           //New Connection
           case 1: 
@@ -233,20 +232,28 @@ int main() {
             }
             break;
           case 2:
-            {
-              int host = read[1];
-              Lobby lobby = lobby_list[host];
-              int num_clients = lobby.client_count;
-              for(int i = 0; i < num_clients; i++){
-                char address_name[46];
-                char port_name[46];
-                getnameinfo((struct sockaddr *)&lobby.client_list[i], lobby.client_len[i], address_name, 20, port_name, 20, NI_NUMERICHOST | NI_NUMERICSERV);
-                printf("Sending to %s on port %s\n", address_name, port_name);
-                sendto(socket_listen, read, bytes_received, 0, (struct sockaddr *)&lobby.client_list[i], lobby.client_len[i]);
-              }
+          {
+            int host = read[1];
+            Lobby lobby = lobby_list[host];
+            int num_clients = lobby.client_count;
+            for(int i = 0; i < num_clients; i++){
+              char address_name[46];
+              char port_name[46];
+              getnameinfo((struct sockaddr *)&lobby.client_list[i], lobby.client_len[i], address_name, sizeof(address_name), port_name, sizeof(port_name), NI_NUMERICHOST | NI_NUMERICSERV);
+              // printf("Sending to %s on port %s\n", address_name, port_name);
+              sendto(socket_listen, read, bytes_received, 0, (struct sockaddr *)&lobby.client_list[i], lobby.client_len[i]);
             }
+          }
             break;
           case 3:
+          {
+            int host = read[1];
+            char address_name[46];
+            char port_name[46];
+            getnameinfo((struct sockaddr *)&sockaddr_host_list[host], socklen_host_list[host], address_name, sizeof(address_name), port_name, sizeof(port_name), NI_NUMERICHOST | NI_NUMERICSERV);
+            // printf("Sending to %s on port %s\n", address_name, port_name);
+            sendto(socket_listen, read, bytes_received, 0, (struct sockaddr *)&sockaddr_host_list[host], socklen_host_list[host]);
+          }
             break;
           default:
             break;
